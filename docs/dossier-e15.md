@@ -1,15 +1,16 @@
 # Dossier DEERTiME E15 (E15_EEA)
 
-Analisi via USB di un tablet Android DEERTiME E15 con touchscreen non funzionante e schermata di blocco attiva.
-Data dell'analisi: 2026-11-08. Host: Linux (Ubuntu), libmtp 1.1.21.
+Analisi via USB di un tablet Android DEERTiME E15 con touchscreen compromesso, destinato al riuso come pannello informativo da scrivania in un homelab.
+Data dell'analisi: 2026-11-08. Host: Linux (Ubuntu), libmtp 1.1.21, scrcpy 1.25, ADB.
 
 ## Sintesi
 
-- Il tablet si enumera correttamente via USB ed espone una sola interfaccia, MTP.
-- Il gadget MTP nel kernel risponde, ma sugli endpoint dati non risponde nessuno, nemmeno a `GetDeviceInfo`.
-- Non è stato possibile leggere storage, file o versione di Android.
-- Causa più probabile, non confermata: tablet bloccato o in modalità "solo ricarica", con il servizio MTP di Android non in ascolto.
-- Via d'uscita consigliata: sblocco con mouse USB su adattatore OTG, poi debug wireless e `scrcpy`.
+- SoC Allwinner A523, Android 14, kernel 5.15, bootloader bloccato, patch di sicurezza di maggio 2024.
+- **RAM fisica reale: 3 GB.** Android riporta 6 GB e le inserzioni ne dichiarano 20 tra fisici e virtuali.
+- Il tablet è stato ripristinato alle impostazioni di fabbrica e ora ha il debug USB attivo e autorizzato.
+- Prima del ripristino era bloccato: esponeva solo MTP e il servizio non rispondeva. Le sezioni sul protocollo documentano quello stato.
+- Supporta AOA 2.0, quindi il PC può iniettare mouse e tastiera via USB senza ADB.
+- Per il riuso come pannello si consiglia di partire da Android con ambiente Linux in user space e di valutare postmarketOS come esperimento separato.
 
 I dati sono distinti in tre livelli: **misurato** su questo esemplare, **dichiarato** da fonti esterne, **ipotesi**.
 
@@ -75,25 +76,76 @@ Il kernel del tablet risponde alle richieste di controllo, mentre la parte appli
 
 Questo è coerente con le segnalazioni pubbliche su dispositivi Android bloccati o in modalità "solo ricarica". Per confermarlo serve sbloccare il tablet e selezionare "Trasferimento file". Un cavo difettoso è improbabile, dato che enumerazione e trasferimenti di controllo funzionano, ma non è escluso del tutto.
 
+## Stato dopo il ripristino (misurato)
+
+Con il debug USB attivo il tablet si presenta come `1f3a:4ee7`, con la sola interfaccia ADB (`ff/42/01`). Dati letti via ADB senza root.
+
+| Voce | Valore |
+| --- | --- |
+| SoC | Allwinner A523 (`sun55iw3p1`, piattaforma `saturn`), arm64 |
+| GPU | Mali-G57, OpenGL ES 3.2 |
+| Android | 14 (SDK 34), primo livello API 34 |
+| Patch di sicurezza | 2024-05-05 |
+| Build | `E15_EEA_20240711`, tipo `user`, chiavi di release |
+| Kernel | 5.15.123 (Android, build del 2024-07-11) |
+| Bootloader | bloccato, verified boot `green` |
+| Partizioni | A/B, Virtual A/B, dynamic partitions, Treble |
+| Cifratura | per file |
+| Display | 800x1280 a 60 Hz |
+| Touch | `gslX680` |
+| Wi-Fi | famiglia AIC8800 su SDIO (moduli `aic8800_*`) |
+| PMIC | famiglia AXP2202 (`axp2202-pek`) |
+| Sensori | accelerometro `sc7a20`, sensore Hall `MH248` |
+| Sblocco OEM | `sys.oem_unlock_allowed=0`, `ro.oem_unlock_supported` vuoto, servizio `oem_lock` presente |
+
+Senza root `/proc/cmdline` e `/proc/device-tree` non sono leggibili.
+
+### RAM reale
+
+| Fonte | Valore |
+| --- | --- |
+| `ro.boot.dramsize` | 3072 MB |
+| Pagine presenti in `/proc/zoneinfo` | 786.432 da 4 KiB, cioè 3 GiB |
+| Pagine gestite dal kernel | 729.569, circa 2,8 GiB |
+| RAM usata + libera secondo `dumpsys meminfo` | circa 3,1 GB |
+| `MemTotal` e "Total RAM" | 6.291.456 kB, esattamente il doppio di 3072 MB |
+| Swap totale | 2.188.700 kB, zram |
+
+Il valore di 6 GB mostrato da Android non corrisponde alla memoria fisica. I 14 GB virtuali pubblicizzati non risultano: lo swap totale è di circa 2,1 GB.
+
+### Modalità USB osservate
+
+| PID | Stato |
+| --- | --- |
+| `4ee1` | MTP |
+| `4ee7` | ADB |
+| `efe8` | Comparso per circa un secondo durante il ripristino. È l'ID della modalità FEL Allwinner, non ancora interrogata |
+
+### AOA (Android Open Accessory)
+
+`GET_PROTOCOL` (richiesta di controllo 51) restituisce la versione 2, che include l'iniezione HID. `scrcpy --otg` ha registrato mouse e tastiera senza errori, ma il primo test si è interrotto per un distacco USB, quindi la ricezione degli eventi sul tablet non è stata confermata.
+
 ## Specifiche del prodotto (dichiarato)
 
-Da inserzioni e manuali online, non verificate su questo esemplare.
+Da inserzioni e manuali online. La colonna a destra indica l'esito della verifica su questo esemplare.
 
-| Voce | Valore dichiarato |
-| --- | --- |
-| SoC | Allwinner octa-core 1,8 GHz, modello non indicato |
-| Display | IPS 10,1" 1280x800 |
-| RAM | 20 GB pubblicizzati: 6 GB fisici + 14 GB virtuali |
-| Storage | 128 GB, espandibile con microSD |
-| Fotocamere | 5 MP anteriore, 8 MP posteriore |
-| Connettività | Wi-Fi 6, Bluetooth 5.0 |
-| Batteria | 6000 mAh |
-| Dimensioni e peso | circa 24,3 x 16,1 cm, 470 g |
-| Sistema operativo | Fonti discordanti: Android 14 o 15 |
+| Voce | Valore dichiarato | Verifica |
+| --- | --- | --- |
+| SoC | Allwinner octa-core 1,8 GHz | A523 |
+| Display | IPS 10,1" 1280x800 | 800x1280 confermato |
+| RAM | 20 GB: 6 GB fisici + 14 GB virtuali | **Falso: 3 GB fisici, 2,1 GB zram** |
+| Storage | 128 GB, espandibile con microSD | Non verificato |
+| Fotocamere | 5 MP anteriore, 8 MP posteriore | Non verificato |
+| Connettività | Wi-Fi 6, Bluetooth 5.0 | Non verificato |
+| Batteria | 6000 mAh | Non verificato |
+| Dimensioni e peso | circa 24,3 x 16,1 cm, 470 g | Non verificato |
+| Sistema operativo | Fonti discordanti: Android 14 o 15 | Android 14 |
 
 ## Procedura di recupero
 
-Requisiti: adattatore OTG adatto alla porta del tablet, mouse USB, eventualmente tastiera USB. Il supporto OTG di questo modello non è stato verificato.
+Senza hardware aggiuntivo si può provare `scrcpy --otg`, che usa AOA dal PC: cliccare nella finestra per catturare mouse e tastiera e guardare lo schermo del tablet, perché in questa modalità non c'è il mirroring.
+
+In alternativa servono un adattatore OTG adatto alla porta del tablet, un mouse USB ed eventualmente una tastiera USB. Il supporto OTG di questo modello non è stato verificato.
 
 1. Collegare il mouse al tablet tramite OTG e sbloccare con PIN o sequenza. La sequenza si traccia tenendo premuto il tasto sinistro.
 2. Per estendere l'accesso, impostare un timeout schermo lungo o rimuovere temporaneamente il blocco.
@@ -108,21 +160,48 @@ Il debug wireless evita il problema della porta unica: l'autorizzazione del debu
 - Copia diretta della memoria con strumenti Allwinner: su Android 14/15 i dati sono cifrati e legati alle credenziali di sblocco.
 - Lasciare il tablet acceso se il touch genera tocchi fantasma: può sbagliare il PIN da solo e imporre attese crescenti.
 
+## Riuso come pannello per homelab
+
+Obiettivo: pannello informativo da scrivania, sempre acceso, senza bisogno del touch. La preferenza è per un client Linux.
+
+| Strada | Sforzo | Rischio | Client Linux | Note |
+| --- | --- | --- | --- | --- |
+| Android + dashboard web in kiosk | Basso | Basso | No | Usa schermo, GPU e Wi-Fi già funzionanti |
+| Android + Termux con Linux in user space | Medio | Basso | Parziale | Nessuno sblocco, gira sul kernel Android |
+| postmarketOS con kernel mainline | Alto | Medio-alto | Completo | Dipende da bootloader, device tree e Wi-Fi |
+
+### Strada consigliata
+
+Partire da Android, che garantisce il pannello funzionante, e trattare postmarketOS come esperimento separato. Termux non è ancora stato provato su questo tablet.
+
+Con 3 GB di RAM conviene evitare un desktop completo. Un compositor leggero o un browser a tutto schermo sono sufficienti.
+
+Accorgimenti da verificare in fase di installazione:
+
+- Tenere il tablet collegato via USB a una macchina dell'homelab: fornisce alimentazione e l'autorizzazione ADB sopravvive ai riavvii, utile dato che il touch non è affidabile.
+- Android 12 e successivi possono terminare i processi di Termux in background. Il limite si può disattivare via ADB.
+- Le patch sono ferme a maggio 2024: tenere il tablet su una rete isolata e non esporre servizi.
+- Una batteria sempre in carica può gonfiarsi: controllarla periodicamente o alimentare il tablet tramite presa programmabile.
+
+### Prerequisiti per postmarketOS
+
+Stato noto: il supporto base per l'A523 è nel kernel mainline dalla 6.15. Un report di agosto 2026 su un Teclast P85T, tablet con lo stesso SoC, con Linux 7.2 indica funzionanti schermo, touch, Wi-Fi, GPU, audio e ricarica, mentre USB, Bluetooth, deep sleep e fotocamere non funzionano o non sono testati, e la RAM risulta ridotta.
+
+Verifiche in ordine di rischio crescente:
+
+1. Controllare in Opzioni sviluppatore se "Sblocco OEM" è presente e attivabile. Lo sblocco cancella i dati.
+2. Interrogare la modalità FEL con `sunxi-tools` per capire se il secure boot è attivo.
+3. Provare l'avvio da microSD con U-Boot e device tree adatti a questa scheda, senza toccare la memoria interna. Un'immagine di un altro tablet può usare tensioni e parametri RAM errati.
+
+Punti critici: il Wi-Fi AIC8800 potrebbe richiedere un driver fuori albero e senza USB funzionante l'alternativa Ethernet viene meno. Serve inoltre un device tree specifico, ricavabile dal firmware originale.
+
 ## Verifiche ancora aperte
 
-Una volta ottenuto ADB:
-
-```sh
-adb shell getprop ro.product.model
-adb shell getprop ro.build.version.release
-adb shell getprop ro.build.version.security_patch
-adb shell getprop ro.board.platform
-adb shell cat /proc/meminfo
-adb shell df -h /data
-adb shell pm list packages
-```
-
-Servono a confermare SoC, versione di Android, patch di sicurezza, RAM fisica reale e app preinstallate.
+- Ricezione degli eventi AOA sul tablet.
+- Stato dell'opzione "Sblocco OEM" e del secure boot.
+- Avvio da microSD.
+- Spazio reale di archiviazione e app preinstallate.
+- Natura del guasto al touch, hardware o software.
 
 ## Riprodurre la sonda
 
@@ -143,3 +222,6 @@ Quando il tablet è sbloccato e in "Trasferimento file", la sonda dovrebbe resti
 - [Red Hat bug 840541: MTP e schermo bloccato](https://bugzilla.redhat.com/show_bug.cgi?id=840541)
 - [GNOME bug 678344: dispositivo bloccato](https://bugzilla.gnome.org/show_bug.cgi?id=678344)
 - [Forum Purism: modalità solo ricarica](https://forums.puri.sm/t/libmtp-error-could-not-get-file-from-device/9925)
+- [Forum Manjaro: Teclast P85T con Linux 7.2](https://forum.manjaro.org/t/allwinner-h728-a523-a527-t527-initial-support-thread/173654/71)
+- [linux-sunxi: A523](https://linux-sunxi.org/A523)
+- [LKML: abilitazione GPU Mali su A523](https://lkml.iu.edu/hypermail/linux/kernel/2507.1/05967.html)
